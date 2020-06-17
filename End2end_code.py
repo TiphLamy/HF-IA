@@ -32,6 +32,7 @@ parameters may be necessary. To compress images with published models, see
 import argparse
 import glob
 import sys
+from pathlib import Path
 
 from absl import app
 from absl.flags import argparse_flags
@@ -305,6 +306,37 @@ def decompress(args):
     tf.train.Saver().restore(sess, save_path=latest)
     sess.run(op, feed_dict=dict(zip(tensors, arrays)))
 
+def compress_or_decompress_images(args, compress=True):
+  """Compresses a set of images
+  args.input_file is interpreted as a pattern specifying PNG image paths (eg "/tmp/*.png").
+  output file will have the same filename, with .tfci suffix
+  In that case, output_file must NOT be specified.
+
+  Note: it would be much more efficient to present images a un tensor
+  here, for the sake of cimplicity, we process image one at a time, using 
+  the unmodified "compress" function.
+  """
+  assert args.output_file is None
+  if compress:
+    op = 'Compressing'
+    src_suffix, dest_suffix = '.png', '.tfci'
+  else:
+    op = 'Decompressing'
+    src_suffix, dest_suffix = '.tfci', '.png'
+  
+  for filename in glob.glob(args.input_file):
+    print("----------------------------------\n{}: {}".format(op, filename))
+    p = Path(filename)
+    assert p.suffix == src_suffix # for safety
+    result_filename = p.with_suffix(dest_suffix)
+    if result_filename.exists():
+      print('Warning: will overwrite {}'.format(result_filename))
+    args.input_file = filename
+    args.output_file = result_filename
+    if compress:
+      compress(args)
+    else:
+      decompress(args)
 
 def parse_args(argv):
   """Parses command line arguments."""
@@ -321,6 +353,9 @@ def parse_args(argv):
   parser.add_argument(
       "--checkpoint_dir", default="train",
       help="Directory where to save/load model checkpoints.")
+  parser.add_argument(
+      "--multiple", "-m", action="store_true",
+      help="Compress or uncompress multiple images (use glob pattern).")
   subparsers = parser.add_subparsers(
       title="commands", dest="command",
       help="What to do: 'train' loads training data and trains (or continues "
@@ -392,13 +427,19 @@ def main(args):
   if args.command == "train":
     train(args)
   elif args.command == "compress":
-    if not args.output_file:
-      args.output_file = args.input_file + ".tfci"
-    compress(args)
+    if args.multiple:
+      compress_images(args)
+    else:
+      if not args.output_file:
+        args.output_file = args.input_file + ".tfci"
+      compress(args)
   elif args.command == "decompress":
-    if not args.output_file:
-      args.output_file = args.input_file + ".png"
-    decompress(args)
+    if args.multiple:
+          decompress_images(args)
+    else:
+      if not args.output_file:
+        args.output_file = args.input_file + ".png"
+      decompress_images()
 
 
 if __name__ == "__main__":
